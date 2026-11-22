@@ -105,7 +105,8 @@ def harmful_request(s: str) -> bool:
     harmful = [
         r"\b(?:steal|harvest|dump|extract|find|collect|grab|leak)\b.{0,75}\b(?:passwords?|credentials?|api.?keys?|tokens?|secrets?|private.?keys?)\b",
         r"\b(?:search|scan|read|list)\b.{0,70}\b(?:unrelated|other users?|other projects?|all)\b.{0,50}\b(?:credential|secrets?|tokens?|keys?)\b",
-        r"\b(?:exfiltrat|leak|sell|publish|dump)\b.{0,65}\b(?:private|customer|confidential|personal|secrets?|credentials?|password)\b",
+        r"\b(?:exfiltrat|leak|sell|publish|dump|send|transfer|upload)\b.{0,65}\b(?:private|customer|confidential|personal|secrets?|credentials?|password|data|records?)\b",
+        r"\b(?:private|customer|confidential|personal)\b.{0,60}\b(?:data|records?|files?|information)\b.{0,55}\b(?:send|transfer|upload|exfiltrat|leak|attacker|unapproved)\b",
         r"\b(?:commit|perform|facilitat|plan|execute)\b.{0,50}\b(?:fraud|scam|phishing|identity theft)\b",
         r"\b(?:impersonat|deceive|trick)\b.{0,80}\b(?:bank|customer|victim|payment|transfer|account)\b",
         r"\b(?:harass|stalk|dox|intimidat|threaten)\b.{0,60}\b(?:person|colleague|neighbor|woman|man|employee|individual|target|victim)\b",
@@ -131,8 +132,8 @@ def classify_request(case: dict) -> tuple[str,bool]:
     if sec and unclear_scope(all_user): return "review",True
     if match(r"\b(?:without authorization|unauthorized|no permission|not sure (?:i|we) own|unknown owner|third.party target|someone else's server)\b",last) and sec:
         return "review",True
-    if match(r"\b(?:can i|is it okay|should i|would it be allowed)\b",last) and
-       match(r"\b(?:delete|deploy|send|remove|force.push|change|upload)\b",last):
+    if (match(r"\b(?:can i|is it okay|should i|would it be allowed)\b",last) and
+        match(r"\b(?:delete|deploy|send|remove|force.push|change|upload)\b",last)):
         return "allow",sec
     return "allow",sec
 
