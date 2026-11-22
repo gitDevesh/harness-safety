@@ -1,0 +1,17 @@
+name: Keep harness preview responsive
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Wake and verify preview health
+        run: |
+          set -euo pipefail
+          URL="https://harness-safety-v3-devesh.onrender.com/health"
+          curl --fail --silent --show-error --location --retry 2 --retry-all-errors --retry-delay 3 --max-time 100 "$URL"
+          echo
+          echo "Preview health check succeeded"
