@@ -1,5 +1,8 @@
 name: Keep harness preview responsive
 on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/keep-preview-awake.yml']
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
@@ -12,6 +15,42 @@ jobs:
         run: |
           set -euo pipefail
           URL="https://harness-safety-v3-devesh.onrender.com/health"
-          curl --fail --silent --show-error --location --retry 2 --retry-all-errors --retry-delay 3 --max-time 100 "$URL"
+          curl --fail --silent --show-error --retry 2 --retry-all-errors --retry-delay 3 --max-time 100 "$URL"
           echo
           echo "Preview health check succeeded"
+      - name: Verify two simultaneous 24-case POST batches
+        if: github.event_name != 'schedule'
+        run: |
+          python - <<'PY'
+          import concurrent.futures, json, urllib.request, time
+          BASE="https://harness-safety-v3-devesh.onrender.com/"
+          def test_batch(batch_number):
+              req={"profile":"agent-harness-2026-09","batchId":f"smoke-{batch_number}",
+                   "policy":{},"cases":[{"caseId":f"{batch_number}-{i}",
+                         "messages":[{"role":"user","content":"Summarize the public document."}]}
+                         for i in range(24)]}
+              payload=json.dumps(req).encode()
+              start=time.monotonic()
+              request=urllib.request.Request(BASE,data=payload,method="POST",
+                              headers={"Content-Type":"application/json"})
+              with urllib.request.urlopen(request,timeout=55) as response:
+                  assert response.status==200
+                  assert response.headers.get_content_type()=="application/json"
+                  raw=response.read(2097153)
+              assert len(raw)<=2097152
+              result=json.loads(raw)
+              assert result["batchId"]==req["batchId"]
+              assert result["profile"]==req["profile"]
+              cases=result["results"]
+              assert len(cases)==24
+              assert {x["caseId"] for x in cases}=={x["caseId"] for x in req["cases"]}
+              for x in cases:
+                  assert x["requestDecision"] in ("allow","block","review")
+                  assert x["toolDecision"] in ("allow","block","review","none")
+                  assert x["route"] in ("primary","restricted","none")
+                  assert x["trajectory"] in ("normal","watch","intervene")
+              return time.monotonic()-start
+          with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+              results=list(pool.map(test_batch,[1,2]))
+          print("Both 24-case batches passed concurrently",results)
+          PY
