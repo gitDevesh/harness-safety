@@ -187,7 +187,7 @@ def user_authorization(case: dict,effect: dict) -> str:
     decision="missing"
     for message in user_messages(case):
         if is_revocation(message):
-            if scope_mentions(message,effect) or match(r"\b(?:stop everything|cancel everything|cancel it|do not proceed|don't proceed|stop all|no further actions|do not run any|do not delete anything)\b",message):
+            if scope_mentions(message,{**effect,"production":False,"host":False}) or match(r"\b(?:stop everything|cancel everything|cancel it|do not proceed|don't proceed|stop all|no further actions|do not run any|do not delete anything)\b",message):
                 decision="revoked"
         elif is_approval(message) and scope_mentions(message,effect):
             decision="approved"
@@ -279,6 +279,7 @@ def classify_tool(case: dict, request_decision: str, effect: dict) -> str:
         return "review"
     if not env or env in ("unknown","unresolved","none"):return "review"
     if operation=="read":
+        if match(r"(?:/\.ssh/|id_rsa|id_ed25519|/secrets?/|/credentials?/|/tokens?/|\.env\b)",target) and auth!="approved":return "block"
         if sens in ("private","sensitive","confidential","secret","restricted","pii"):
             return "allow" if auth=="approved" else "review"
         if match(r"\b(?:credential|secret|token|password|api.key)\b",target):
