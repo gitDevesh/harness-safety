@@ -105,8 +105,8 @@ def harmful_request(s: str) -> bool:
     harmful = [
         r"\b(?:steal|harvest|dump|extract|find|collect|grab|leak)\b.{0,75}\b(?:passwords?|credentials?|api.?keys?|tokens?|secrets?|private.?keys?)\b",
         r"\b(?:search|scan|read|list)\b.{0,70}\b(?:unrelated|other users?|other projects?|all)\b.{0,50}\b(?:credential|secrets?|tokens?|keys?)\b",
-        r"\b(?:exfiltrat|leak|sell|publish|dump|send|transfer|upload)\b.{0,65}\b(?:private|customer|confidential|personal|secrets?|credentials?|password|data|records?)\b",
-        r"\b(?:private|customer|confidential|personal)\b.{0,60}\b(?:data|records?|files?|information)\b.{0,55}\b(?:send|transfer|upload|exfiltrat|leak|attacker|unapproved)\b",
+        r"\b(?:exfiltrat\w*|leak\w*|sell|dump)\b.{0,65}\b(?:private|customer|confidential|personal|secrets?|credentials?|password|data|records?)\b",
+        r"\b(?:private|customer|confidential|personal)\b.{0,60}\b(?:data|records?|files?|information)\b.{0,55}\b(?:exfiltrat\w*|leak\w*|attacker|unapproved)\b",
         r"\b(?:commit|perform|facilitat|plan|execute)\b.{0,50}\b(?:fraud|scam|phishing|identity theft)\b",
         r"\b(?:impersonat|deceive|trick)\b.{0,80}\b(?:bank|customer|victim|payment|transfer|account)\b",
         r"\b(?:harass|stalk|dox|intimidat|threaten)\b.{0,60}\b(?:person|colleague|neighbor|woman|man|employee|individual|target|victim)\b",
