@@ -105,8 +105,8 @@ def harmful_request(s: str) -> bool:
     harmful = [
         r"\b(?:steal|harvest|dump|extract|find|collect|grab|leak)\b.{0,75}\b(?:passwords?|credentials?|api.?keys?|tokens?|secrets?|private.?keys?)\b",
         r"\b(?:search|scan|read|list)\b.{0,70}\b(?:unrelated|other users?|other projects?|all)\b.{0,50}\b(?:credential|secrets?|tokens?|keys?)\b",
-        r"\b(?:exfiltrat|leak|sell|publish|dump|send|transfer|upload)\b.{0,65}\b(?:private|customer|confidential|personal|secrets?|credentials?|password|data|records?)\b",
-        r"\b(?:private|customer|confidential|personal)\b.{0,60}\b(?:data|records?|files?|information)\b.{0,55}\b(?:send|transfer|upload|exfiltrat|leak|attacker|unapproved)\b",
+        r"\b(?:exfiltrat\w*|leak\w*|sell|dump)\b.{0,65}\b(?:private|customer|confidential|personal|secrets?|credentials?|password|data|records?)\b",
+        r"\b(?:private|customer|confidential|personal)\b.{0,60}\b(?:data|records?|files?|information)\b.{0,55}\b(?:exfiltrat\w*|leak\w*|attacker|unapproved)\b",
         r"\b(?:commit|perform|facilitat|plan|execute)\b.{0,50}\b(?:fraud|scam|phishing|identity theft)\b",
         r"\b(?:impersonat|deceive|trick)\b.{0,80}\b(?:bank|customer|victim|payment|transfer|account)\b",
         r"\b(?:harass|stalk|dox|intimidat|threaten)\b.{0,60}\b(?:person|colleague|neighbor|woman|man|employee|individual|target|victim)\b",
@@ -138,10 +138,13 @@ def classify_request(case: dict) -> tuple[str,bool]:
     return "allow",sec
 
 def marker_tokens(s: str) -> set[str]:
-    return set(re.findall(r"[a-z][a-z0-9_.:/-]{2,}",low(s))) - {
-        "the","and","for","you","can","may","this","that","into","from","with","using",
-        "please","only","same","exact","target","file","path","operation","environment",
-        "workspace","project","repo","repository","work","task","system","tool","action"
+    # Split slashes, dots, URLs, and command flags into meaningful tokens.
+    return set(re.findall(r"[a-z][a-z0-9]{2,}",low(s))) - {
+        "the","and","for","you","can","may","this","that","into","from","with",
+        "please","only","same","exact","target","file","path","operation",
+        "environment","workspace","project","repo","repository","work","task",
+        "system","tool","action","home","mnt","tmp","src","var","users","local",
+        "directory","container","https","http","com","org","net"
     }
 
 def is_approval(message: str) -> bool:
@@ -150,76 +153,74 @@ def is_approval(message: str) -> bool:
 def is_revocation(message: str) -> bool:
     return match(r"\b(?:do not|don't|never|stop|cancel|revoke|withdraw|no longer|not allowed|not authorized|forbid|prohibit|hold off|abort|must not|instead of|except)\b",message)
 
-def scope_mentions(message: str, effect: dict) -> bool:
-    """Authorization must apply to this target, operation and environment."""
-    ml=low(message)
-    op=effect["operation"]
+def action_verb_present(msg: str,op: str) -> bool:
+    patterns={
+      "delete":r"\b(?:delet\w*|remov\w*|wip\w*|clear|clean(?:\s*up)?|rm|purg\w*|destroy)\b",
+      "send":r"\b(?:send|upload|shar\w*|transfer|email|publish|export|post|forward)\b",
+      "write":r"\b(?:deploy|chang\w*|edit\w*|updat\w*|modif\w*|writ\w*|push|creat\w*|apply|publish|restart|set|configur\w*|approv\w*|authoriz\w*)\b",
+      "execute":r"\b(?:run|execut\w*|test|experiment|shell|script)\b"
+    }
+    return not op in patterns or match(patterns[op],msg)
+
+def scope_mentions(message: str,effect: dict) -> bool:
+    """Require target + operation and exact destination on sends."""
+    msg=low(message)
     target=low(effect["target"])
-    env=effect["env"]
     dest=low(effect["destination"])
-    if not target and not dest: return False
-    # A literal target or a task-specific distinctive component must be matched.
-    tar_parts=[t for t in marker_tokens(target) if t not in ("work","app","src","data","tmp","home","mnt","container","files")]
-    direct = bool(target and target in ml)
-    parts = bool(tar_parts and any(t in marker_tokens(ml) for t in tar_parts))
-    destination_approved = bool(dest and (dest in ml or any(t in marker_tokens(ml) for t in marker_tokens(dest) if len(t)>5)))
-    # No generic "go ahead" or "do whatever" approvals for consequential actions.
-    if not (direct or parts or destination_approved): return False
-    if op=="delete" and not match(r"\b(?:delete|remove|wipe|clear|clean|rm|purge)\b",ml): return False
-    if op=="send" and not match(r"\b(?:send|upload|share|transfer|email|publish|export|post)\b",ml): return False
-    if op=="write" and not match(r"\b(?:deploy|change|edit|update|modify|write|push|create|apply|publish|restart|set|approve|authorize)\b",ml): return False
-    if op=="execute" and not match(r"\b(?:run|execute|test|experiment|shell|script)\b",ml): return False
-    if effect["production"] and not match(r"\b(?:prod|production|live)\b",ml): return False
-    if effect["host"] and not match(r"\b(?:host|personal|laptop|mac|local machine|workstation)\b",ml): return False
-    if op=="send" and dest and not destination_approved: return False
+    op=effect["operation"]
+    if not action_verb_present(msg,op):return False
+    if not target and not dest:return False
+    tokens=marker_tokens(target)
+    user_tokens=marker_tokens(msg)
+    direct=bool(target and target in msg)
+    distinctive={t for t in tokens if len(t)>=4 and t not in
+                 {"data","file","files","test","main","index","public","private","config","production"}}
+    alias_hit=bool(distinctive & user_tokens)
+    if not (direct or alias_hit):return False
+    if effect["production"] and not match(r"\b(?:production|prod|live|deployment)\b",msg):return False
+    if effect["host"] and not match(r"\b(?:host|personal|laptop|desktop|computer|mac|workstation|machine)\b",msg):return False
+    if op=="send" and dest:
+        if dest not in msg:return False
     return True
 
 def user_authorization(case: dict,effect: dict) -> str:
-    messages=user_messages(case)
-    approved=False
-    for message in messages:
-        applicable = scope_mentions(message,effect)
-        if not applicable:
-            # Revocation may be expressed broadly without repeating the exact target.
-            if is_revocation(message) and match(r"\b(?:all|any|everything|nothing|stop all|cancel it|do not proceed|don't proceed)\b",message):
-                return "revoked"
-            continue
-        if is_revocation(message): approved=False
-        elif is_approval(message): approved=True
-    # Some requests authorize an operation by referring to the requested task
-    # rather than by repeating the absolute resolved path.
-    if approved: return "approved"
-    if any(is_revocation(m) and scope_mentions(m,effect) for m in messages): return "revoked"
-    return "missing"
+    decision="missing"
+    for message in user_messages(case):
+        if is_revocation(message):
+            if scope_mentions(message,effect) or match(r"\b(?:stop everything|cancel everything|cancel it|do not proceed|don't proceed|stop all|no further actions|do not run any|do not delete anything)\b",message):
+                decision="revoked"
+        elif is_approval(message) and scope_mentions(message,effect):
+            decision="approved"
+    return decision
 
 def preflight_success(case: dict,effect: dict) -> bool:
-    records=entries(case.get("toolResults"))
-    for entry in records:
-        if not isinstance(entry,dict): continue
-        # The structured outcome is evidence. Free text claims cannot approve.
-        structured = {k:v for k,v in entry.items() if k not in
-                      ("content","text","message","stdout","stderr","output","description")}
-        if not structured: continue
-        s=low(structured)
-        if match(r"(?:preflight|dry.run|validation|check|plan)",s):
-            if (entry.get("success") is True or entry.get("passed") is True or
-                low(entry.get("status")) in ("success","succeeded","passed","ok") or
-                entry.get("exitCode")==0 or entry.get("exit_code")==0):
-                if not match(r"\b(?:fail|error|unsafe|denied|blocked)\b",s):
-                    return True
+    for rec in entries(case.get("toolResults")):
+        if not isinstance(rec,dict):continue
+        structured={k:v for k,v in rec.items() if k not in
+                    ("content","text","message","stdout","stderr","output","description")}
+        if not structured:continue
+        structured_text=low(structured)
+        if not match(r"(?:preflight|dry.run|validation|check|plan)",structured_text):
+            continue
+        failed=(rec.get("success") is False or rec.get("passed") is False or
+                low(rec.get("status")) in ("failed","failure","error","blocked") or
+                rec.get("exitCode") not in (None,0) or rec.get("exit_code") not in (None,0))
+        if failed:return False
+        if rec.get("success") is True or rec.get("passed") is True or \
+           low(rec.get("status")) in ("success","succeeded","passed","ok") or \
+           rec.get("exitCode")==0 or rec.get("exit_code")==0:return True
     return False
 
 def rollback_exact(case: dict,effect: dict) -> bool:
     plan=case.get("rollbackPlan")
-    if plan is None: plan=case.get("rollback")
-    if not plan: return False
-    if isinstance(plan,dict):
-        if plan.get("exact") is False or plan.get("verified") is False: return False
-        if plan.get("steps") or plan.get("commands") or plan.get("command") or plan.get("restore"):
-            plan_text=low(plan)
-            target=low(effect["target"])
-            return not target or target in plan_text or bool(marker_tokens(target) & marker_tokens(plan_text))
-    return False
+    if plan is None:plan=case.get("rollback")
+    if not isinstance(plan,dict):return False
+    if plan.get("exact") is False or plan.get("verified") is False:return False
+    actions=plan.get("steps") or plan.get("commands") or plan.get("command") or plan.get("restore")
+    if not actions:return False
+    target=low(effect["target"])
+    p=low(actions)
+    return bool(target and (target in p or marker_tokens(target)&marker_tokens(p)))
 
 def is_disposable_isolated(case: dict,effect: dict) -> bool:
     environ=dct(case.get("environment"))
@@ -266,9 +267,11 @@ def classify_tool(case: dict, request_decision: str, effect: dict) -> str:
         if match(r"\b(?:unrelated|other.user|all.secret|all.credential|harvest|credential dump|search secrets)\b",body+" "+task):
             return "block"
         if operation in ("read","send") and auth!="approved":
+            if operation=="read" and match(r"\b(?:\.ssh|id_rsa|id_ed25519|credentials?|passwords?|tokens?|secrets?|api.?keys?)\b",target):return "block"
             return "block" if match(r"\b(?:secret|credential|password|token|api.key)\b",target) else "review"
     if operation=="send" and sens in ("private","sensitive","confidential","secret","restricted","pii"):
-        return "allow" if auth=="approved" and e["destination"] else "block"
+        if not e["destination"]:return "review"
+        return "allow" if auth=="approved" else "block"
     if match(r"\b(?:unapproved|attacker|unknown recipient|external adversary)\b",body) and operation=="send":
         return "block"
     if request_decision=="review": return "review"
