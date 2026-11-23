@@ -18,6 +18,31 @@ jobs:
           curl --fail --silent --show-error --retry 2 --retry-all-errors --retry-delay 3 --max-time 100 "$URL"
           echo
           echo "Preview health check succeeded"
+      - name: Test RAG public endpoint without grader
+        run: |
+          python - <<'PY'
+          import json, time, urllib.request, urllib.error, concurrent.futures
+          base="https://rag-colosseum-devesh.onrender.com"
+          t=time.monotonic()
+          with urllib.request.urlopen(base+"/health",timeout=55) as h:
+              print("GET /health", h.status, "time",round(time.monotonic()-t,3), "body",h.read(1000).decode())
+          def probe(i):
+              payload=json.dumps({"question":"What is the default timeout for Raft leader election?" if i%2==0 else "Explain quorum in a distributed system", "top_k":3}).encode()
+              request=urllib.request.Request(base+"/query",data=payload,headers={"Content-Type":"application/json"},method="POST")
+              start=time.monotonic()
+              with urllib.request.urlopen(request,timeout=55) as resp:
+                  body=resp.read(10000)
+                  result=json.loads(body)
+                  assert resp.status==200
+                  assert resp.headers.get_content_type()=="application/json"
+                  assert resp.headers.get("Access-Control-Allow-Origin")=="*"
+                  assert all(k in result for k in ("answer","sources","scores","confidence"))
+                  print("POST /query",i,"status",resp.status,"seconds",round(time.monotonic()-start,3),"CORS",resp.headers.get("Access-Control-Allow-Origin"),"body",body[:600].decode())
+                  return True
+          with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+              assert all(pool.map(probe,range(8)))
+          print("RAG live HTTP contract checks: PASS")
+          PY
       - name: Verify two simultaneous 24-case POST batches
         if: github.event_name != 'schedule'
         run: |
