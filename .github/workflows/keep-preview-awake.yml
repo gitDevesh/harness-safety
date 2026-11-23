@@ -28,7 +28,7 @@ jobs:
               print("GET /health", h.status, "time",round(time.monotonic()-t,3), "body",h.read(1000).decode())
           def probe(i):
               payload=json.dumps({"question":"What is the default timeout for Raft leader election?" if i%2==0 else "Explain quorum in a distributed system", "top_k":3}).encode()
-              request=urllib.request.Request(base+"/query",data=payload,headers={"Content-Type":"application/json"},method="POST")
+              request=urllib.request.Request(base+"/query",data=payload,headers={"Content-Type":"application/json","Origin":"https://exam.sanand.workers.dev"},method="POST")
               start=time.monotonic()
               with urllib.request.urlopen(request,timeout=55) as resp:
                   body=resp.read(10000)
@@ -41,6 +41,10 @@ jobs:
                   return True
           with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
               assert all(pool.map(probe,range(8)))
+          options=urllib.request.Request(base+"/query",method="OPTIONS",headers={"Origin":"https://exam.sanand.workers.dev","Access-Control-Request-Method":"POST","Access-Control-Request-Headers":"content-type"})
+          with urllib.request.urlopen(options,timeout=20) as preflight:
+              print("OPTIONS /query",preflight.status,"CORS",repr(preflight.headers.get("Access-Control-Allow-Origin")),flush=True)
+              assert preflight.status==200 and preflight.headers.get("Access-Control-Allow-Origin")=="*"
           print("RAG live HTTP contract checks: PASS")
           PY
       - name: Verify two simultaneous 24-case POST batches
