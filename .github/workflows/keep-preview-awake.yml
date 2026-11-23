@@ -33,11 +33,11 @@ jobs:
               with urllib.request.urlopen(request,timeout=55) as resp:
                   body=resp.read(10000)
                   result=json.loads(body)
+                  print("POST /query",i,"status",resp.status,"seconds",round(time.monotonic()-start,3),"type",resp.headers.get_content_type(),"CORS",repr(resp.headers.get("Access-Control-Allow-Origin")),"body",body[:600].decode(),flush=True)
                   assert resp.status==200
                   assert resp.headers.get_content_type()=="application/json"
                   assert resp.headers.get("Access-Control-Allow-Origin")=="*"
                   assert all(k in result for k in ("answer","sources","scores","confidence"))
-                  print("POST /query",i,"status",resp.status,"seconds",round(time.monotonic()-start,3),"CORS",resp.headers.get("Access-Control-Allow-Origin"),"body",body[:600].decode())
                   return True
           with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
               assert all(pool.map(probe,range(8)))
