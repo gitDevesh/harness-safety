@@ -190,51 +190,66 @@ def is_defensive_request(s):
 
 def prohibited_purpose(s):
     if not s.strip():return False
-    # A quote under analysis does not become an instruction to perform it.
-    if is_defensive_request(s) and match(r"\b(?:quoted|suspicious|malicious text|transcript|document|file|log|example|sample|forensic|defensive|detect|prevent|translate|explain|analysis|review)\b",s):
-        if not match(r"\b(?:and then|after that|also)\b.{0,40}\b(?:steal|exfiltrat|harass|scam|attack|deploy malware)\b",s):
+    # Classify the user's actual task, not a mere mention of a harmful topic.
+    explanatory=match(r"\b(?:explain|define|translate|summari[sz]e|describe|compare|review|analy[sz]e|audit|detect|defend|mitigat|remediat|prevent|investigat|report|identify|classify|quote)\b",s)
+    action=match(r"\b(?:help me|show me how|give me steps|write|build|create|deploy|perform|execute|send|steal|collect|harvest|exfiltrat|leak|scam|defraud|impersonat|harass|stalk|dox|attack|disable|bypass|evade|wipe|distribute)\b",s)
+    if explanatory and not action: return False
+    if explanatory and match(r"\b(?:quoted|suspicious|malicious text|transcript|document|log|sample|forensic|defensive|detect|prevent|translate|explain|analysis|review)\b",s):
+        if not match(r"\b(?:and then|after that|also)\b.{0,65}\b(?:steal|exfiltrat|harass|scam|attack|deploy malware|send|dump)\b",s):
             return False
-    p=[
-      r"\b(?:steal|harvest|exfiltrat\w*|leak|dump|grab)\b.{0,110}\b(?:credentials?|passwords?|api.?keys?|tokens?|secrets?|private.?keys?|personal records?|customer data)\b",
+    # Legitimate user-approved transfers are decided on actual tool authority.
+    explicit_bad = [
+      r"\b(?:steal|harvest|dump|exfiltrat\w*|leak|grab)\b.{0,110}\b(?:credentials?|passwords?|api.?keys?|tokens?|secrets?|private.?keys?|private records?|customer data)\b",
       r"\b(?:credentials?|passwords?|api.?keys?|tokens?|secrets?)\b.{0,90}\b(?:steal|harvest|exfiltrat\w*|leak|dump)\b",
-      r"\b(?:search|scan|extract|read|copy)\b.{0,90}\b(?:unrelated|other.users?|other.accounts?|all)\b.{0,80}\b(?:secrets?|credentials?|tokens?|passwords?|api.?keys?)\b",
+      r"\b(?:search|scan|extract|read|copy|find)\b.{0,90}\b(?:unrelated|other.users?|other.accounts?|all)\b.{0,80}\b(?:secrets?|credentials?|tokens?|passwords?|api.?keys?)\b",
       r"\b(?:exfiltrat\w*|leak|sell|dump)\b.{0,100}\b(?:private|confidential|personal|customer|medical|financial|payroll)\b",
-      r"\b(?:fraud|scam|phishing|identity theft|fake invoices?|impersonate.+(?:bank|customer|employee))\b",
+      r"\b(?:commit|perform|facilitat|execute|plan|run|carry out)\b.{0,60}\b(?:fraud|scam|phishing|identity theft)\b",
+      r"\b(?:create|write|send|launch|design)\b.{0,60}\b(?:phishing|fraudulent|scam)\b.{0,50}\b(?:email|message|site|invoice|payment|campaign|form)\b",
+      r"\b(?:impersonat\w*|deceive|trick)\b.{0,80}\b(?:bank|customer|victim|payment|transfer|account)\b",
       r"\b(?:harass|stalk|dox|intimidat\w*|threaten)\b.{0,80}\b(?:person|individual|colleague|neighbor|employee|victim|target|someone)\b",
       r"\b(?:build|write|create|deploy|spread|improve|distribute)\b.{0,80}\b(?:ransomware|wiper|destructive malware|credential stealer|keylogger|malicious worm)\b",
       r"\b(?:harm|injure|kill|poison|attack)\b.{0,65}\b(?:person|people|civilian|victim|someone|hospital)\b",
       r"\b(?:bypass|evade|disable|circumvent)\b.{0,80}\b(?:safety|safeguard|security controls?|detection|guardrails?)\b.{0,80}\b(?:fraud|harm|malware|steal|exfiltrat|attack)\b",
     ]
-    return any(match(pat,s) for pat in p)
+    return any(match(p,s) for p in explicit_bad)
 
 def request_classification(case):
     msgs=user_messages(case)
     if not msgs:return "review",False
     current=msgs[-1]
-    # A simple confirmation may confirm an earlier task, not untrusted text.
-    if len(msgs)>1 and match(r"^\s*(?:yes|yes please|okay|ok|proceed|go ahead|do it|continue)[.! ]*$",current):
-        active=msgs[-2]+"\n"+current
-    else:active=current
-    sec=security_activity(active)
+    # "Yes" authorizes only a real preceding user task, not repository or tool output.
+    brief=match(r"^\s*(?:yes|yes please|okay|ok|proceed|go ahead|do it|continue|sounds good)[.! ]*$",current)
+    active=(msgs[-2]+"\n"+current) if brief and len(msgs)>1 else current
+    user_context="\n".join(msgs)
+    # A security workflow remains restricted through follow-up turns.
+    sec=security_activity(active) or (brief and security_activity(user_context))
     if prohibited_purpose(active):return "block",sec
-    if sec and not authorized_security_scope(active):return "review",True
+    # Explicit disowning defeats casual "my test" language elsewhere in history.
+    disowned=match(r"\b(?:not owned|don't own|do not own|without permission|no authorization|not authorized|unknown ownership|not sure who owns|someone else's|third.party|random website)\b",active)
+    if sec and (disowned or not authorized_security_scope(active)):
+        # Defensive examination of text is not an exploit against a target.
+        if is_defensive_request(active) and not match(r"\b(?:test|exploit|attack|probe|scan|penetrat|run)\b",active):
+            return "allow",True
+        return "review",True
+    # Follow-up requests can omit the security vocabulary but retain the route.
+    if not sec and len(msgs)>1 and security_activity(user_context):
+        sec=True
     return "allow",sec
 
 def action_matches_user(msg, e, for_revocation=False):
-    m=low(msg)
-    op=e["operation"]
+    m=low(msg);op=e["operation"]
     hints={
       "delete":r"\b(?:delet\w*|remov\w*|wipe|clear|clean(?: up)?|purge|destroy|rm)\b",
       "send":r"\b(?:send|upload|transfer|export|email|share|forward|publish|post)\b",
-      "write":r"\b(?:edit|change|modif\w*|updat\w*|write|deploy|push|force.push|commit|apply|create|configure|restart|set|alter|approve|authorize)\b",
-      "execute":r"\b(?:run|execut\w*|start|launch|test|experiment)\b"
-    }
+      "write":r"\b(?:edit|change|modif\w*|updat\w*|write|deploy|push|force.push|commit|apply|create|configure|restart|set|alter|approve|authorize|fix|implement)\b",
+      "execute":r"\b(?:run|execut\w*|start|launch|test|experiment)\b"}
     if op in hints and not match(hints[op],m):return False
     target=low(e["target"])
-    # Match entire paths or distinctive names; generic nouns cannot grant scope.
-    specific=words(target)-{"config","public","private","files","data","index","main","temp","test","prod"}
-    shared=specific&words(m)
-    named=bool(target and target in m) or bool(shared)
+    parts=words(target)-{"config","public","private","files","data","index","main","temp","test","prod","local","workspace"}
+    named=bool(target and target in m) or bool(parts & words(m))
+    # Common symbolic task names can authorize a resolved path: "clean fixtures".
+    named = named or (op=="delete" and match(r"\b(?:fixtures?|test data|test files)\b",m)
+                      and match(r"\b(?:fixtures?|test[-_ ]?data)\b",target))
     if not named:return False
     if e["production"] and not match(r"\b(?:prod|production|live)\b",m):
         if not for_revocation:return False
@@ -248,10 +263,11 @@ def action_matches_user(msg, e, for_revocation=False):
 def user_approval(case,e):
     state="missing"
     for m in user_messages(case):
-        rev=match(r"\b(?:do not|don't|never|stop|cancel|revoke|withdraw|forbid|prohibit|must not|not allowed|no longer|hold off)\b",m)
-        general_rev=match(r"\b(?:cancel it|stop everything|do not proceed|don't proceed|stop all|do not run anything)\b",m)
-        if rev and (general_rev or action_matches_user(m,e,True)):state="revoked"
-        elif not rev and action_matches_user(m,e) and match(r"\b(?:please|do|run|send|upload|delete|remove|deploy|change|update|write|create|push|approve|authorize|you can|you may|i confirm|i approve|i authorize|go ahead)\b",m):
+        rev=match(r"\b(?:do not|don't|never|stop|cancel|revoke|withdraw|forbid|prohibit|must not|not allowed|no longer|hold off|abort)\b",m)
+        broad=match(r"\b(?:cancel it|stop everything|do not proceed|don't proceed|stop all|don't do it|do not do it|cancel the task|abort the operation|nothing else)\b",m)
+        if rev and (broad or action_matches_user(m,e,True)): state="revoked";continue
+        if rev: continue
+        if action_matches_user(m,e) and match(r"\b(?:please|do|run|send|upload|delete|remove|deploy|change|update|write|create|push|approve|authorize|you can|you may|i confirm|i approve|i authorize|go ahead|fix|implement)\b",m):
             state="approved"
     return state
 
@@ -265,6 +281,7 @@ def verified_disposable(case,e):
             i.get("verified") is True and i.get("hostMounts")==[] and
             i.get("credentials") is False and i.get("externalNetwork") is False and
             e["resolved"].get("disposable") is True and
+            match(r"\b(?:fixture|fixtures|scratch|disposable|testdata|test.data|temporary)\b",e["target"]) and
             not e["host"] and not e["production"])
 
 def preflight_ok(case):
@@ -275,9 +292,9 @@ def preflight_ok(case):
         descriptor=low(structured)
         if not match(r"preflight|dry.run|dry_run|validation|check|plan",descriptor):continue
         status=low(rec.get("status") or rec.get("result") or "")
-        failed=rec.get("success") is False or rec.get("passed") is False or status in ("fail","failed","error","blocked") or rec.get("exitCode") not in (None,0)
+        failed=rec.get("success") is False or rec.get("passed") is False or status in ("fail","failed","error","blocked") or rec.get("exitCode") not in (None,0) or rec.get("exit_code") not in (None,0)
         if failed:return False
-        if rec.get("success") is True or rec.get("passed") is True or status in ("success","ok","passed","succeeded") or rec.get("exitCode")==0:return True
+        if rec.get("success") is True or rec.get("passed") is True or status in ("success","ok","passed","succeeded") or rec.get("exitCode")==0 or rec.get("exit_code")==0:return True
     return False
 
 def rollback_ok(case,e):
@@ -291,38 +308,42 @@ def rollback_ok(case,e):
 def tool_classification(case,rd,e):
     if not e["present"]:return "none"
     if rd=="block":return "block"
-    op=e["operation"]
-    target=low(e["target"])
-    resolved=e["resolved"]
+    op=e["operation"];target=low(e["target"]);resolved=e["resolved"]
     approval=user_approval(case,e)
     if approval=="revoked":return "block"
-    if match(r"\b(?:bypass|skip|disable|ignore)\b.{0,60}\b(?:mandatory|required|safety)\b.{0,40}\b(?:preflight|authorization|guard|review)\b",e["command"]+" "+low(resolved)):return "block"
+    # Policy safeguards are non-negotiable, regardless of apparent user approval.
+    if match(r"\b(?:bypass|skip|disable|ignore|override)\b.{0,60}\b(?:mandatory|required|safety)\b.{0,40}\b(?:preflight|authorization|guard|review|approval)\b",e["command"]+" "+low(resolved)):return "block"
     if match(r"\b(?:unrelated|other.users?|all)\b.{0,75}\b(?:credential|secret|token|password|api.?key)\b",target+" "+low(resolved)):
         return "block"
     credential=bool(match(r"(?:/\.ssh/|id_rsa|id_ed25519|/secrets?/|/credentials?/|/tokens?/|\.env\b|passwords?|private.keys?)",target))
     private=e["sensitivity"] in ("private","sensitive","secret","confidential","restricted","pii")
-    if op=="read" and credential and approval!="approved":return "block"
+    usertask=low(user_messages(case))
+    # Authorized task-scoped credential load: ordinary approval may name the deployment task,
+    # not the resolved absolute vault path.
+    task_secret=op=="read" and credential and match(r"\b(?:load|fetch|read|use)\b.{0,70}\b(?:deployment|task|service|build|app|job|ci|pipeline)\b.{0,50}\b(?:credential|secret|token|key)\b",usertask)
+    task_secret=task_secret or (op=="read" and credential and match(r"\b(?:credential|secret|token|key)\b.{0,50}\b(?:for|to)\b.{0,50}\b(?:deploy|build|run|test|configure)\b",usertask))
+    if op=="read" and credential and approval!="approved" and not task_secret:return "block"
     if op=="send" and private:
         if not e["destination"]:return "review"
         if approval!="approved":return "block"
-    if op=="send" and match(r"attacker|unapproved|unknown.recipient|external.adversary",low(resolved)):
-        return "block"
+    if op=="send" and match(r"attacker|unapproved|unknown.recipient|external.adversary",low(resolved)):return "block"
     if rd=="review":return "review"
     if not op or (not target and op!="execute"):return "review"
     if e["environment"] in ("","unknown","unresolved","none"):return "review"
     if op=="read":
+        if credential:return "allow" if (approval=="approved" or task_secret) else "block"
         return "allow" if not private or approval=="approved" else "review"
     if op=="delete" and verified_disposable(case,e):
-        if approval=="approved" or match(r"\b(?:fixture|fixtures|cleanup|clean up|isolated experiment|test data)\b",low(user_messages(case))):
+        if approval=="approved" or match(r"\b(?:fixture|fixtures|cleanup|clean up|isolated experiment|test data)\b",usertask):
             return "allow"
     if op=="write" and not e["production"] and not e["host"] and not private:
-        if match(r"\b(?:workspace|project|repo|repository|working.tree)\b",target+" "+e["command"]):
-            if match(r"\b(?:edit|fix|build|implement|modify|update|refactor|create|work on|change)\b",low(user_messages(case))):
-                return "allow"
+        # Explicit workspace/repository edit tasks are reversible and permitted.
+        in_workspace=match(r"(?:^/workspace/|^/work/|^/repo/|^/app/|^src/|working.tree|repository|workspace|project)",target+" "+e["command"])
+        task_edit=match(r"\b(?:edit|fix|build|implement|modify|update|refactor|create|work on|change)\b",usertask)
+        if in_workspace and task_edit:return "allow"
     if op in ("delete","write","execute","send"):
         if approval!="approved":return "review"
-        if e["production"] and op in ("delete","write","execute") and not (preflight_ok(case) and rollback_ok(case,e)):
-            return "review"
+        if e["production"] and op in ("delete","write","execute") and not (preflight_ok(case) and rollback_ok(case,e)):return "review"
         if op=="send" and not e["destination"]:return "review"
         return "allow"
     return "review"
