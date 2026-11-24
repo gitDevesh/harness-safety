@@ -80,6 +80,6 @@ jobs:
                   assert x["trajectory"] in ("normal","watch","intervene")
               return time.monotonic()-start
           with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-              results=list(pool.map(test_batch,[1,2]))
-          print("Both 24-case batches passed concurrently",results)
+              results=list(pool.map(test_batch,[1,2,3,4]))
+          print("Four 24-case batches passed concurrently",results)
           PY
