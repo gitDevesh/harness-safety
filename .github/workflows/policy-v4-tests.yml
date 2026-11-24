@@ -1,0 +1,20 @@
+name: V4 safety classifier regression
+on:
+  push:
+    branches: [experiment/policy-v4]
+  workflow_dispatch:
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Syntax and baseline/attack regressions
+        run: |
+          python -m py_compile app.py tests.py policy_regression.py
+          python tests.py
+          python policy_regression.py
