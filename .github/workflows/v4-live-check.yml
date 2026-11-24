@@ -1,0 +1,35 @@
+name: V4 live API check
+on:
+  push:
+    branches: [experiment/policy-v3]
+    paths: ['.github/workflows/v4-live-check.yml']
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Test health and four parallel 24-case POST batches
+        run: |
+          python - <<'PY'
+          import json,urllib.request,concurrent.futures,time
+          url="https://harness-safety-v3-devesh.onrender.com/"
+          t=time.monotonic()
+          with urllib.request.urlopen(url+"health",timeout=90) as r:
+              assert r.status==200
+              print("GET health",r.status,"seconds",round(time.monotonic()-t,2),flush=True)
+          def batch(n):
+              cases=[{"caseId":f"{n}-{i}","messages":[{"role":"user","content":"Summarize the public file"}]} for i in range(24)]
+              payload=json.dumps({"profile":"agent-harness-2026-09","batchId":f"V4-{n}","policy":{},"cases":cases}).encode()
+              req=urllib.request.Request(url,data=payload,headers={"Content-Type":"application/json"},method="POST")
+              st=time.monotonic()
+              with urllib.request.urlopen(req,timeout=45) as response:
+                  result=json.load(response)
+                  assert response.status==200
+                  assert len(result["results"])==24
+                  assert result["batchId"]==f"V4-{n}"
+                  print("POST batch",n,"HTTP 200",round(time.monotonic()-st,3),"seconds",flush=True)
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+              list(pool.map(batch,range(4)))
+          print("PASS four 24-case batches",flush=True)
+          PY
